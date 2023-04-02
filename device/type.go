@@ -1,4 +1,4 @@
-package buildhat
+package device
 
 const (
 	PassiveMotor        string = "PassiveMotor"
@@ -13,13 +13,13 @@ const (
 	Motor                      = "Motor"
 )
 
-type DeviceType struct {
+type Type struct {
 	TypeId uint32
 	Type   string
 	Name   string
 }
 
-var DeviceTypes = map[uint32]DeviceType{
+var Types = map[uint32]Type{
 	0x1:  {TypeId: 0x1, Type: PassiveMotor, Name: "PassiveMotor"},
 	0x2:  {TypeId: 0x2, Type: PassiveMotor, Name: "PassiveMotor"},
 	0x8:  {TypeId: 0x8, Type: Light, Name: "Light"},                                  // 88005

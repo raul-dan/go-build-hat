@@ -1,6 +1,9 @@
-package buildhat
+package frame
 
-import "errors"
+import (
+	"buildhat/frame/hat"
+	"errors"
+)
 
 type Frame interface {
 	IsEOF(buff []byte) bool
@@ -11,10 +14,10 @@ type Frame interface {
 func NewFrame(cmd string) (Frame, error) {
 	switch cmd {
 	case "version":
-		return &FirmwareVersionFrame{}, nil
+		return &hat.FirmwareVersionFrame{}, nil
 
 	case "vin":
-		return &VoltageInFrame{}, nil
+		return &hat.VoltageInFrame{}, nil
 
 	default:
 		return nil, errors.New("Unknown command: " + cmd)

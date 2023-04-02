@@ -1,7 +1,7 @@
 package buildhat
 
 import (
-	frame "buildhat/frame"
+	"buildhat/frame"
 	"bytes"
 	"go.bug.st/serial"
 	"go.uber.org/zap"
@@ -15,13 +15,13 @@ var Serial = &SerialConnection{
 }
 
 func sExec(cmd string) interface{} {
-	frame, err := Serial.Execute(cmd)
+	resultFrame, err := Serial.Execute(cmd)
 
 	if err != nil {
 		panic(err)
 	}
 
-	return frame.GetContent()
+	return resultFrame.GetContent()
 }
 
 type SerialConnection struct {
@@ -98,7 +98,12 @@ func (s *SerialConnection) read() {
 
 			if currentFrame.f.IsEOF(pageContent) {
 				s.pending = s.pending[1:]
-				currentFrame.f.ParseBuffer(pageContent)
+				err := currentFrame.f.ParseBuffer(pageContent)
+
+				if err != nil {
+					panic("Unable to parse frame. Received error: " + err.Error())
+				}
+
 				page = make([]byte, 0)
 				currentFrame.c <- currentFrame.f
 				close(currentFrame.c)

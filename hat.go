@@ -1,28 +1,21 @@
 package buildhat
 
-import "buildhat/device"
+import (
+	"buildhat/device"
+	"buildhat/frame/hat"
+)
 
-var hat *IHat
-
-type IHat struct {
+type Hat struct {
 }
 
-func (h *IHat) GetFirmwareVersion() string {
-	return sExec("version").(string)
+func (h *Hat) GetFirmwareVersion() string {
+	return sExec(hat.VersionCommand).(string)
 }
 
-func (h *IHat) GetVin() float64 {
-	return sExec("vin").(float64)
+func (h *Hat) GetVin() float32 {
+	return sExec(hat.VoltageInCommand).(float32)
 }
 
-func (h *IHat) GetDevices() []device.Type {
+func (h *Hat) GetDevices() []device.Type {
 	return sExec("list").([]device.Type)
-}
-
-func Hat() *IHat {
-	if hat == nil {
-		hat = new(IHat)
-	}
-
-	return hat
 }

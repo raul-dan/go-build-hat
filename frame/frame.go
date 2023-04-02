@@ -13,11 +13,14 @@ type Frame interface {
 
 func NewFrame(cmd string) (Frame, error) {
 	switch cmd {
-	case "version":
+	case hat.VersionCommand:
 		return &hat.FirmwareVersionFrame{}, nil
 
-	case "vin":
+	case hat.VoltageInCommand:
 		return &hat.VoltageInFrame{}, nil
+
+	case InitCommand:
+		return &VoidFrame{}, nil
 
 	default:
 		return nil, errors.New("Unknown command: " + cmd)

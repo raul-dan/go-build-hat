@@ -2,6 +2,7 @@ package buildhat
 
 import (
 	"buildhat/frame"
+	"buildhat/frame/hat"
 	"bytes"
 	goserial "go.bug.st/serial"
 	"go.uber.org/zap"
@@ -43,6 +44,9 @@ func (s *serialConnection) open() {
 		s.portMode = &goserial.Mode{
 			BaudRate: 115200,
 		}
+
+		logger.Debug("Opening serial port", zap.String("port", s.portTTY), zap.Int("baud", s.portMode.BaudRate))
+
 		var err error
 		s.port, err = goserial.Open("/dev/serial0", s.portMode)
 
@@ -51,7 +55,14 @@ func (s *serialConnection) open() {
 		}
 
 		s.isOpened = true
+		s.init()
 	}
+}
+
+func (s *serialConnection) init() {
+	logger.Debug("Initializing HAT")
+	logger.Debug("Hat version: " + sExec(hat.VersionCommand).(string))
+	sExec(frame.InitCommand)
 }
 
 func (s *serialConnection) read() {
@@ -62,7 +73,6 @@ func (s *serialConnection) read() {
 	s.readerStarted = true
 
 	go func() {
-		s.open()
 		delimiter := []byte("\r\n")
 		page := make([]byte, 0)
 
@@ -75,6 +85,7 @@ func (s *serialConnection) read() {
 			size, err := s.port.Read(buff)
 
 			currentFrame := s.pending[0]
+			_, currentFrameIsVoid := currentFrame.f.(*frame.VoidFrame)
 
 			if err != nil {
 				logger.Error("Error reading from serial port", zap.Error(err))
@@ -90,15 +101,19 @@ func (s *serialConnection) read() {
 			page = append(page, buff[:size]...)
 			pageSize := len(page)
 
-			if pageSize <= 4 || !bytes.Equal(delimiter, page[:2]) || !bytes.Equal(delimiter, page[pageSize-2:pageSize]) {
+			if (pageSize <= 4 && !currentFrameIsVoid) ||
+				!bytes.Equal(delimiter, page[:2]) ||
+				!bytes.Equal(delimiter, page[pageSize-2:pageSize]) {
 				continue
 			}
 
-			pageContent := page[2 : pageSize-2]
+			if !currentFrameIsVoid {
+				page = page[2 : pageSize-2]
+			}
 
-			if currentFrame.f.IsEOF(pageContent) {
+			if currentFrame.f.IsEOF(page) {
 				s.pending = s.pending[1:]
-				err := currentFrame.f.ParseBuffer(pageContent)
+				err := currentFrame.f.ParseBuffer(page)
 
 				if err != nil {
 					panic("Unable to parse frame. Received error: " + err.Error())
@@ -113,16 +128,22 @@ func (s *serialConnection) read() {
 	}()
 }
 
-func (s *serialConnection) write(cmd string, output chan frame.Frame) {
+func (s *serialConnection) write(data []byte) {
+	logger.Debug("Writing data to serial port", zap.String("data", string(data)))
+	s.port.Write(data)
+}
+
+func (s *serialConnection) readFrame(cmd string, output chan frame.Frame) {
+	s.open()
+
 	newFrame, err := frame.NewFrame(cmd)
 
 	if err != nil {
 		panic("Unable to create frame for command " + cmd + ". Received error: " + err.Error())
 	}
 
-	s.open()
 	s.pending = append(s.pending, pendingFrame{c: output, f: newFrame})
-	s.port.Write(append([]byte(cmd), '\r'))
+	s.write(append([]byte(cmd), '\r'))
 	s.read()
 }
 
@@ -132,7 +153,7 @@ func (s *serialConnection) Execute(cmd string) (frame.Frame, error) {
 	output := make(chan frame.Frame)
 
 	go func() {
-		s.write(cmd, output)
+		s.readFrame(cmd, output)
 	}()
 
 	return <-output, nil

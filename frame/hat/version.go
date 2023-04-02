@@ -2,6 +2,7 @@ package hat
 
 import "strings"
 
+const VersionCommand string = "version"
 const versionPrefix = "Firmware version: "
 
 type FirmwareVersionFrame struct {

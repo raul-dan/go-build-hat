@@ -3,19 +3,19 @@ package buildhat
 import (
 	"buildhat/frame"
 	"bytes"
-	"go.bug.st/serial"
+	goserial "go.bug.st/serial"
 	"go.uber.org/zap"
 )
 
-var Serial = &SerialConnection{
+var serial = &serialConnection{
 	portTTY: "/dev/serial0",
-	portMode: &serial.Mode{
+	portMode: &goserial.Mode{
 		BaudRate: 115200,
 	},
 }
 
 func sExec(cmd string) interface{} {
-	resultFrame, err := Serial.Execute(cmd)
+	resultFrame, err := serial.Execute(cmd)
 
 	if err != nil {
 		panic(err)
@@ -24,10 +24,10 @@ func sExec(cmd string) interface{} {
 	return resultFrame.GetContent()
 }
 
-type SerialConnection struct {
+type serialConnection struct {
 	portTTY       string
-	port          serial.Port
-	portMode      *serial.Mode
+	port          goserial.Port
+	portMode      *goserial.Mode
 	isOpened      bool
 	pending       []pendingFrame
 	readerStarted bool
@@ -38,13 +38,13 @@ type pendingFrame struct {
 	f frame.Frame
 }
 
-func (s *SerialConnection) open() {
+func (s *serialConnection) open() {
 	if !s.isOpened {
-		s.portMode = &serial.Mode{
+		s.portMode = &goserial.Mode{
 			BaudRate: 115200,
 		}
 		var err error
-		s.port, err = serial.Open("/dev/serial0", s.portMode)
+		s.port, err = goserial.Open("/dev/serial0", s.portMode)
 
 		if err != nil {
 			panic("Unable to open serial port. Received error: " + err.Error())
@@ -54,7 +54,7 @@ func (s *SerialConnection) open() {
 	}
 }
 
-func (s *SerialConnection) read() {
+func (s *serialConnection) read() {
 	if s.readerStarted {
 		return
 	}
@@ -113,7 +113,7 @@ func (s *SerialConnection) read() {
 	}()
 }
 
-func (s *SerialConnection) write(cmd string, output chan frame.Frame) {
+func (s *serialConnection) write(cmd string, output chan frame.Frame) {
 	newFrame, err := frame.NewFrame(cmd)
 
 	if err != nil {
@@ -126,7 +126,7 @@ func (s *SerialConnection) write(cmd string, output chan frame.Frame) {
 	s.read()
 }
 
-func (s *SerialConnection) Execute(cmd string) (frame.Frame, error) {
+func (s *serialConnection) Execute(cmd string) (frame.Frame, error) {
 	logger.Debug("Executing command", zap.String("cmd", cmd))
 
 	output := make(chan frame.Frame)

@@ -1,9 +1,10 @@
 package buildhat
 
-import "go.uber.org/zap"
-
-var logger, _ = zap.NewProduction()
+import (
+	"buildhat/logger"
+	"go.uber.org/zap"
+)
 
 func SetLogger(l *zap.Logger) {
-	logger = l
+	logger.SetInstance(l)
 }

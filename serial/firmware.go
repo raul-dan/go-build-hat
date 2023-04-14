@@ -1,7 +1,6 @@
 package serial
 
 import (
-	"embed"
 	"strings"
 )
 
@@ -57,7 +56,3 @@ func (v HatVersionDto) BelongsTo(buffer []byte) bool {
 		strings.HasPrefix(string(buffer), versionPrefix) ||
 		strings.HasPrefix(string(buffer), bootloaderPrefix)
 }
-
-var reader = embed.FS{}
-
-var firmwareSignature, _ = reader.ReadFile("data/signature.bin")

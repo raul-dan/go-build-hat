@@ -1,6 +1,8 @@
 package serial
 
-import "bytes"
+import (
+	"regexp"
+)
 
 type Dto interface {
 	Append(buffer []byte) Dto
@@ -9,26 +11,33 @@ type Dto interface {
 	GetObject() interface{}
 }
 
-type SimpleDto struct {
-	ExpectedReply []byte
+// RegexpDto is used to match a series of buffers against a series of regular
+// expressions. The DTO will be considered complete when all regular expressions
+// have been matched.
+type RegexpDto struct {
+	matchedBuffer [][]byte
+	Patterns      []*regexp.Regexp
 }
 
-func (s SimpleDto) Append(buffer []byte) Dto {
+func (s RegexpDto) Append(buffer []byte) Dto {
+	s.matchedBuffer = append(s.matchedBuffer, buffer)
 	return s
 }
 
-func (s SimpleDto) IsComplete() bool {
-	return true
+func (s RegexpDto) IsComplete() bool {
+	return len(s.matchedBuffer) == len(s.Patterns)
 }
 
-func (s SimpleDto) BelongsTo(buffer []byte) bool {
-	return bytes.Equal(s.ExpectedReply, buffer)
+func (s RegexpDto) BelongsTo(buffer []byte) bool {
+	return s.Patterns[len(s.matchedBuffer)].Match(buffer)
 }
 
-func (s SimpleDto) GetObject() interface{} {
-	return s.ExpectedReply
+func (s RegexpDto) GetObject() interface{} {
+	return s.matchedBuffer
 }
 
+// A VoidDto is a DTO that does not expect any data to be returned from the
+// serial connection. Write and forget.
 type VoidDto struct {
 }
 

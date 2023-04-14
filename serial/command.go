@@ -1,7 +1,7 @@
 package serial
 
 type Command struct {
-	cmd            string
+	cmd            []byte
 	isVoid         bool // true if the command does not return any data
 	isSubscription bool // true if the command is a subscription
 	dto            Dto  // the Dto to use to parse the response
@@ -17,8 +17,7 @@ func (c *Connection) registerCommand(cmd *Command) {
 		return
 	}
 
-	c.channels[cmd] = make(chan interface{}, 1)
-	c.commands = append(c.commands, cmd)
+	c.commandChannels[cmd] = make(chan interface{}, 1)
 }
 
 func (c *Connection) execute(cmd Command) interface{} {
@@ -29,7 +28,7 @@ func (c *Connection) execute(cmd Command) interface{} {
 		go func(cmd *Command) {
 			callback := *cmd.callback
 			select {
-			case data := <-c.channels[cmd]:
+			case data := <-c.commandChannels[cmd]:
 				callback(data)
 			default:
 
@@ -37,9 +36,13 @@ func (c *Connection) execute(cmd Command) interface{} {
 		}(&cmd)
 	}
 
+	if !cmd.isVoid && c.readingPaused {
+		c.resumeRead()
+	}
+
 	if cmd.isSubscription || cmd.isVoid {
 		return nil
 	}
 
-	return <-c.channels[&cmd]
+	return <-c.commandChannels[&cmd]
 }

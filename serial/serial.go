@@ -5,25 +5,30 @@ import (
 	"reflect"
 )
 
-var connection *Connection = &Connection{
+var connection = &Connection{
 	portTTY: "/dev/serial0",
 	portMode: &goserial.Mode{
 		BaudRate: 115200,
 	},
-	channels: map[*Command]chan interface{}{},
+	commandChannels:      map[*Command]chan interface{}{},
+	readInterruptSignals: make(chan bool, 1),
 }
 
 func IsConnected() bool {
 	return connection.isConnected
 }
 
-func Execute(command string, dto Dto, cCallback CommandCallback) interface{} {
+func Execute(command interface{}, dto Dto, cCallback CommandCallback) interface{} {
+	if reflect.TypeOf(command).String() == "string" {
+		command = append([]byte(command.(string)), '\r')
+	}
+
 	cmd := Command{
-		cmd: command,
+		cmd: command.([]byte),
 		dto: dto,
 	}
 
-	if reflect.TypeOf(dto).String() == "serial.SimpleDto" {
+	if reflect.TypeOf(dto).String() == reflect.TypeOf(VoidDto{}).String() {
 		cmd.isVoid = true
 	}
 	if cCallback != nil {

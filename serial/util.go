@@ -1,5 +1,7 @@
 package serial
 
+import "time"
+
 func checksum(buff []byte) uint32 {
 	var sum uint32 = 1
 
@@ -14,4 +16,24 @@ func checksum(buff []byte) uint32 {
 	}
 
 	return sum
+}
+
+func runWithTimeout(timeout time.Duration, f func() interface{}, errorMessage ...string) interface{} {
+	done := make(chan interface{})
+	var data interface{} = nil
+
+	go func() {
+		done <- f()
+	}()
+
+	select {
+	case data = <-done:
+		return data
+	case <-time.After(timeout):
+		if len(errorMessage) > 0 {
+			panic(errorMessage[0])
+		}
+
+		panic("Timeout reached")
+	}
 }

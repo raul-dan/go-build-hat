@@ -6,17 +6,18 @@ import (
 	goserial "go.bug.st/serial"
 	"go.uber.org/zap"
 	"math"
-	"reflect"
+	"time"
 )
 
 type Connection struct {
-	portTTY        string
-	port           goserial.Port
-	portMode       *goserial.Mode
-	isConnected    bool
-	readingStarted bool
-	channels       map[*Command]chan interface{}
-	commands       []*Command
+	portTTY              string
+	port                 goserial.Port
+	portMode             *goserial.Mode
+	isConnected          bool
+	readingStarted       bool
+	readingPaused        bool
+	readInterruptSignals chan bool
+	commandChannels      map[*Command]chan interface{}
 }
 
 func (c *Connection) connect() {
@@ -31,79 +32,130 @@ func (c *Connection) connect() {
 		panic("Unable to open serial port. Received error: " + err.Error())
 	}
 
+	err = c.port.SetReadTimeout(time.Millisecond * 100)
+
+	if err != nil {
+		panic("Unable to set serial port read timeout. Received error: " + err.Error())
+	}
+
 	c.isConnected = true
-	c.boot()
+
+	runWithTimeout(time.Second*10, func() interface{} {
+		c.boot()
+		return nil
+	}, "Unable to boot HAT")
 }
 
-func (c *Connection) continuousRead() {
-	if c.readingStarted {
+func (c *Connection) startRead() {
+	if c.readingStarted || c.readingPaused {
 		return
 	}
 
-	c.readingStarted = true
-
 	go func() {
+		c.readingStarted = true
+
 		delimiter := []byte("\r\n")
 		stalledBuff := make([]byte, 0)
 
 		for {
-			buff := make([]byte, 100)
-			size, err := c.port.Read(buff)
+			select {
+			case <-c.readInterruptSignals:
+				c.readingStarted = false
+				c.readingPaused = true
+				return
 
-			if err != nil {
-				panic("Unable to read from serial port. Received error: " + err.Error())
-			}
+			default:
+				buff := make([]byte, 32)
+				size, err := c.port.Read(buff)
 
-			stalledBuff = append(stalledBuff, buff[:size]...)
-			stalledSize := len(stalledBuff)
+				if err != nil {
+					panic("Unable to read from serial port. Received error: " + err.Error())
+				}
 
-			if stalledSize < 2 || !bytes.Equal(delimiter, stalledBuff[stalledSize-2:]) {
-				continue
-			}
-
-			logger.Instance.Debug(
-				"Read data from serial connection",
-				zap.Int("size", stalledSize),
-				zap.String("buff", string(stalledBuff)),
-			)
-
-			for _, line := range bytes.Split(stalledBuff, delimiter) {
-				if len(line) == 0 {
+				if size == 0 {
 					continue
 				}
 
-				for command, channel := range c.channels {
-					if (*command).dto.BelongsTo(line) {
-						(*command).dto = command.dto.Append(line)
+				logger.Instance.Debug(
+					"Read data from serial connection",
+					zap.Int("size", size),
+					zap.String("buff", string(buff[:size])),
+				)
 
-						if !(*command).dto.IsComplete() {
-							continue
-						}
+				stalledBuff = append(stalledBuff, buff[:size]...)
+				stalledSize := len(stalledBuff)
 
-						channel <- (*command).dto.GetObject()
+				if stalledSize < 2 || !bytes.Equal(delimiter, stalledBuff[stalledSize-2:]) {
+					continue
+				}
 
-						if !command.isSubscription {
-							close(channel)
-							delete(c.channels, command)
-						}
+				for _, line := range bytes.Split(stalledBuff, delimiter) {
+					if len(line) == 0 {
+						continue
+					}
+
+					if c.broadcastBuffer(line) {
+						// reset buffer
+						stalledBuff = make([]byte, 0)
 					}
 				}
-			}
 
-			// reset buffer
-			stalledBuff = make([]byte, 0)
+			}
 		}
+
 	}()
 }
 
-func (c *Connection) write(data interface{}) {
-	if reflect.TypeOf(data).String() == "string" {
-		// add separator if we are writing a string
-		data = append([]byte(data.(string)), '\r')
+func (c *Connection) broadcastBuffer(buffer []byte) bool {
+	fullyIngested := false
+
+	for command, channel := range c.commandChannels {
+		if (*command).dto.BelongsTo(buffer) {
+			(*command).dto = command.dto.Append(buffer)
+
+			if !(*command).dto.IsComplete() {
+				continue
+			}
+
+			channel <- (*command).dto.GetObject()
+			fullyIngested = true
+
+			if !(*command).isSubscription {
+				close(channel)
+				delete(c.commandChannels, command)
+			}
+		}
 	}
 
+	return fullyIngested
+}
+
+func (c *Connection) pauseRead() {
+	if !c.readingStarted || c.readingPaused {
+		return
+	}
+
+	runWithTimeout(time.Second*2, func() interface{} {
+		c.readInterruptSignals <- true
+
+		for {
+			if c.readingPaused {
+				break
+			}
+		}
+
+		return nil
+	}, "Unable to pause serial connection read")
+}
+
+func (c *Connection) resumeRead() {
+	c.readingPaused = false
+	c.startRead()
+}
+
+func (c *Connection) write(data []byte) {
 	// write bytes to serial port
-	_, err := c.port.Write(data.([]byte))
+	_, err := c.port.Write(data)
 
 	if err != nil {
 		panic("Unable to write to serial port. Received error: " + err.Error())
@@ -111,8 +163,8 @@ func (c *Connection) write(data interface{}) {
 
 	logger.Instance.Debug(
 		"Wrote data to serial connection",
-		zap.ByteString("data", data.([]byte)[:int(math.Min(float64(len(data.([]byte))), 10))]),
+		zap.ByteString("data", data[:int(math.Min(float64(len(data)), 20))]),
 	)
 
-	c.continuousRead()
+	c.startRead()
 }

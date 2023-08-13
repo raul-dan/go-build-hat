@@ -1,4 +1,4 @@
-package serial
+package dto
 
 import (
 	"strings"
@@ -17,7 +17,7 @@ type BootLoaderState struct {
 	version          string
 }
 
-func (v HatVersionDto) Append(buffer []byte) Dto {
+func (v HatVersionDto) IngestBuffer(buffer []byte) Dto {
 	if v.state == nil {
 		v.state = &BootLoaderState{}
 	}
@@ -51,7 +51,7 @@ func (v HatVersionDto) GetObject() interface{} {
 	return v.state.version
 }
 
-func (v HatVersionDto) BelongsTo(buffer []byte) bool {
+func (v HatVersionDto) Matches(buffer []byte) bool {
 	return string(buffer) == "version" ||
 		strings.HasPrefix(string(buffer), versionPrefix) ||
 		strings.HasPrefix(string(buffer), bootloaderPrefix)

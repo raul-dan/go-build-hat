@@ -1,7 +1,7 @@
 package device
 
 import (
-	"buildhat/device/dto"
+	"buildhat/dto"
 	"buildhat/serial"
 )
 
@@ -11,16 +11,16 @@ type Hat struct {
 
 func (h *Hat) GetFirmwareVersion() string {
 	if h.version == "" {
-		h.version = serial.Execute("version", serial.HatVersionDto{}, nil).(string)
+		h.version = serial.Execute("version", dto.HatVersionDto{}).(string)
 	}
 
 	return h.version
 }
 
 func (h *Hat) GetVin() float32 {
-	return serial.Execute("vin", dto.VoltageDto{}, nil).(float32)
+	return serial.Execute("vin", dto.VoltageDto{}).(float32)
 }
 
-func (h *Hat) GetDevices() string {
-	return serial.Execute("list", dto.ListDevicesDto{}, nil).(string)
+func (h *Hat) GetDevices() ConnectedInventory {
+	return serial.Execute("list", dto.ListDevicesDto{}).(ConnectedInventory)
 }

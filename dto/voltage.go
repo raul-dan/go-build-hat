@@ -1,7 +1,6 @@
 package dto
 
 import (
-	"buildhat/serial"
 	"strconv"
 )
 
@@ -9,7 +8,7 @@ type VoltageDto struct {
 	voltage float32
 }
 
-func (v VoltageDto) Append(buffer []byte) serial.Dto {
+func (v VoltageDto) IngestBuffer(buffer []byte) Dto {
 	voltage, err := strconv.ParseFloat(string(buffer[:len(buffer)-2]), 32)
 
 	if err != nil {
@@ -25,7 +24,7 @@ func (v VoltageDto) IsComplete() bool {
 	return v.voltage != 0
 }
 
-func (v VoltageDto) BelongsTo(buffer []byte) bool {
+func (v VoltageDto) Matches(buffer []byte) bool {
 	return len(buffer) > 2 && string(buffer[len(buffer)-2:]) == " V"
 }
 

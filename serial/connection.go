@@ -1,10 +1,12 @@
 package serial
 
 import (
+	serialdto "buildhat/dto"
 	"buildhat/logger"
 	"bytes"
 	goserial "go.bug.st/serial"
 	"go.uber.org/zap"
+	"golang.org/x/exp/slices"
 	"math"
 	"time"
 )
@@ -17,7 +19,7 @@ type Connection struct {
 	readingStarted       bool
 	readingPaused        bool
 	readInterruptSignals chan bool
-	commandChannels      map[*Command]chan interface{}
+	commands             []*Command
 }
 
 func (c *Connection) connect() {
@@ -40,7 +42,7 @@ func (c *Connection) connect() {
 
 	c.isConnected = true
 
-	runWithTimeout(time.Second*10, func() interface{} {
+	runWithTimeout(time.Minute*20, func() interface{} {
 		c.boot()
 		return nil
 	}, "Unable to boot HAT")
@@ -54,7 +56,6 @@ func (c *Connection) startRead() {
 	go func() {
 		c.readingStarted = true
 
-		delimiter := []byte("\r\n")
 		stalledBuff := make([]byte, 0)
 
 		for {
@@ -83,51 +84,100 @@ func (c *Connection) startRead() {
 				)
 
 				stalledBuff = append(stalledBuff, buff[:size]...)
-				stalledSize := len(stalledBuff)
-
-				if stalledSize < 2 || !bytes.Equal(delimiter, stalledBuff[stalledSize-2:]) {
-					continue
-				}
-
-				for _, line := range bytes.Split(stalledBuff, delimiter) {
-					if len(line) == 0 {
-						continue
-					}
-
-					if c.broadcastBuffer(line) {
-						// reset buffer
-						stalledBuff = make([]byte, 0)
-					}
-				}
-
+				stalledBuff = c.ingestBuffer(stalledBuff)
 			}
 		}
 
 	}()
 }
 
-func (c *Connection) broadcastBuffer(buffer []byte) bool {
-	fullyIngested := false
+func (c *Connection) ingestBuffer(buffer []byte) []byte {
+	delimiter := []byte("\r\n")
 
-	for command, channel := range c.commandChannels {
-		if (*command).dto.BelongsTo(buffer) {
-			(*command).dto = command.dto.Append(buffer)
+	if len(buffer) < 2 || !bytes.Contains(buffer, delimiter) {
+		return buffer
+	}
 
-			if !(*command).dto.IsComplete() {
-				continue
-			}
+	unprocessedBuffer := make([]byte, 0)
+	inputLines := bytes.Split(buffer, delimiter)
 
-			channel <- (*command).dto.GetObject()
-			fullyIngested = true
+	if len(inputLines[len(inputLines)-1]) > 0 {
+		// the last line is not complete, we're going to keep it aside
+		unprocessedBuffer = inputLines[len(inputLines)-1]
+		inputLines = inputLines[:len(inputLines)-1]
+	}
 
-			if !(*command).isSubscription {
-				close(channel)
-				delete(c.commandChannels, command)
-			}
+	if len(inputLines) >= 1 && len(inputLines[0]) == 0 {
+		// also remove any potential leading blank line
+		inputLines = inputLines[1:]
+	}
+
+	inputLines, commandsPendingRelease := c.pipeToMultiLineCommands(inputLines)
+	inputLines, successfulCommands := c.pipeToLineByLineCommands(inputLines)
+	commandsPendingRelease = append(commandsPendingRelease, successfulCommands...)
+
+	for _, command := range commandsPendingRelease {
+		(*command).channel <- (*command).dto.GetObject()
+		logger.Instance.Debug("Releasing command", zap.String("command", string((*command).cmd)))
+
+		if serialdto.IsSubscription((*command).dto) {
+			(*command).dto = (*command).dto.(serialdto.SubscriptionDto).Reset()
+		} else {
+			c.removeCommand(command)
 		}
 	}
 
-	return fullyIngested
+	return bytes.Join(append(inputLines, unprocessedBuffer), delimiter)
+}
+
+func (c *Connection) pipeToMultiLineCommands(lines [][]byte) ([][]byte, []*Command) {
+	remainingBuffer := make([][]byte, 0)
+	var commands []*Command
+
+	for _, line := range lines {
+		remainingBuffer = append(remainingBuffer, line)
+		bufferWithNl := bytes.Join(remainingBuffer, []byte("\n"))
+
+		for _, command := range c.commands {
+			if serialdto.IsLineByLine((*command).dto) || !(*command).dto.Matches(bufferWithNl) {
+				continue
+			}
+
+			(*command).dto = command.dto.IngestBuffer(bufferWithNl)
+			commands = append(commands, command)
+			remainingBuffer = make([][]byte, 0)
+		}
+	}
+
+	return remainingBuffer, commands
+}
+
+func (c *Connection) pipeToLineByLineCommands(lines [][]byte) ([][]byte, []*Command) {
+	remainingBuffer := make([][]byte, 0)
+	var completeCommands []*Command
+
+	for _, line := range lines {
+		ingested := false
+
+		for _, command := range c.commands {
+			if slices.Contains(completeCommands, command) || !(*command).dto.Matches(line) {
+				continue
+			}
+
+			(*command).dto = command.dto.IngestBuffer(line)
+			ingested = true
+
+			if (*command).dto.(serialdto.LineByLineDto).IsComplete() {
+				completeCommands = append(completeCommands, command)
+			}
+		}
+
+		if !ingested {
+			remainingBuffer = append(remainingBuffer, line)
+		}
+	}
+
+	return remainingBuffer, completeCommands
 }
 
 func (c *Connection) pauseRead() {
@@ -145,7 +195,7 @@ func (c *Connection) pauseRead() {
 		}
 
 		return nil
-	}, "Unable to pause serial connection read")
+	}, "Unable to pause serial hatConnection read")
 }
 
 func (c *Connection) resumeRead() {

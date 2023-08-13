@@ -1,11 +1,13 @@
 package serial
 
 import (
+	"buildhat/dto"
 	"buildhat/logger"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"time"
 )
 
 var isBooted = false
@@ -17,14 +19,15 @@ func (c *Connection) boot() {
 
 	isBooted = true
 
-	var bootLoaderState = Execute("version", HatVersionDto{Boot: true}, nil).(*BootLoaderState)
+	var bootLoaderState = Execute("version", dto.HatVersionDto{Boot: true}).(*dto.BootLoaderState)
 
 	if !(*bootLoaderState).RequiresFirmware {
 		logger.Instance.Debug("HAT already booted")
-		return
+	} else {
+		loadFirmware()
 	}
 
-	loadFirmware()
+	logger.Instance.Debug("HAT booted successfully")
 }
 
 func loadFirmware() {
@@ -32,40 +35,41 @@ func loadFirmware() {
 	firmwareBinary, _ := os.ReadFile(firmwarePath)
 	firmwareChecksum := checksum(firmwareBinary)
 
-	promptDto := RegexpDto{
-		Patterns: []*regexp.Regexp{regexp.MustCompile(`(?i)^BHBL>(\s)?(version|clear)?$`)},
-	}
-
 	logger.Instance.Debug("Booting HAT")
-	Execute("clear", promptDto, nil)
+
+	Execute("clear", dto.RegexpDto{
+		Patterns: []*regexp.Regexp{regexp.MustCompile(`(?i)^BHBL>(\s)?(version|clear)?$`)},
+	})
 
 	// prepare payload
 	firmwarePayload := append([]byte{0x02}, append(firmwareBinary, []byte{0x03, '\r'}...)...)
 
 	// suspend reading until full payload is sent. reading will resume automatically after write completes
-	connection.pauseRead()
+	hatConnection.pauseRead()
 
 	// send firmware size and checksum
-	Execute(fmt.Sprintf("load %d %d", len(firmwareBinary), firmwareChecksum), VoidDto{}, nil)
+	Execute(fmt.Sprintf("load %d %d", len(firmwareBinary), firmwareChecksum), dto.VoidDto{})
 
 	// and finally send the payload
-	Execute(firmwarePayload, RegexpDto{
+	Execute(firmwarePayload, dto.RegexpDto{
 		Patterns: []*regexp.Regexp{
 			regexp.MustCompile("(?i)^Image Received$"),
 			regexp.MustCompile("(?i)^Checksum OK$"),
 		},
-	}, nil)
+	})
 
 	// send signature
 	writeFirmwareSignature()
 
 	// and finally reboot
-	Execute("reboot", RegexpDto{
+	Execute("reboot", dto.RegexpDto{
 		Patterns: []*regexp.Regexp{
 			regexp.MustCompile("(?i)^Done initialising ports$"),
 		},
-	}, nil)
+	})
 
+	// sleep half of second to allow HAT to reboot
+	time.Sleep(time.Microsecond * 500)
 	logger.Instance.Debug("Firmware loaded successfully")
 }
 
@@ -76,16 +80,16 @@ func writeFirmwareSignature() {
 	// send signature size
 	Execute(
 		[]byte(fmt.Sprintf("signature %d\r", len(signatureBinary))),
-		VoidDto{}, nil,
+		dto.VoidDto{},
 	)
 
 	// prepare payload
 	signaturePayload := append([]byte{0x02}, append(signatureBinary, []byte{0x03, '\r'}...)...)
 
 	// and finally send the payload
-	Execute(signaturePayload, RegexpDto{
+	Execute(signaturePayload, dto.RegexpDto{
 		Patterns: []*regexp.Regexp{
 			regexp.MustCompile("(?i)^Signature received$"),
 		},
-	}, nil)
+	})
 }

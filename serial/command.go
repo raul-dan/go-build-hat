@@ -1,11 +1,14 @@
 package serial
 
+import (
+	"buildhat/dto"
+)
+
 type Command struct {
-	cmd            []byte
-	isVoid         bool // true if the command does not return any data
-	isSubscription bool // true if the command is a subscription
-	dto            Dto  // the Dto to use to parse the response
-	callback       CommandCallback
+	cmd     []byte
+	isVoid  bool    // true if the command does not return any data
+	dto     dto.Dto // the Dto to use to parse the response
+	channel chan interface{}
 }
 
 type CommandCallback *func(data interface{})
@@ -17,32 +20,24 @@ func (c *Connection) registerCommand(cmd *Command) {
 		return
 	}
 
-	c.commandChannels[cmd] = make(chan interface{}, 1)
+	c.commands = append(c.commands, cmd)
 }
 
-func (c *Connection) execute(cmd Command) interface{} {
-	c.registerCommand(&cmd)
-	c.write(cmd.cmd)
-
-	if cmd.isSubscription {
-		go func(cmd *Command) {
-			callback := *cmd.callback
-			select {
-			case data := <-c.commandChannels[cmd]:
-				callback(data)
-			default:
-
-			}
-		}(&cmd)
+func (c *Connection) removeCommand(command *Command) {
+	for i, cmd := range c.commands {
+		if cmd == command {
+			c.commands = append(c.commands[:i], c.commands[i+1:]...)
+			close(cmd.channel)
+			break
+		}
 	}
+}
+
+func (c *Connection) execute(cmd *Command) {
+	c.registerCommand(cmd)
+	c.write((*cmd).cmd)
 
 	if !cmd.isVoid && c.readingPaused {
 		c.resumeRead()
 	}
-
-	if cmd.isSubscription || cmd.isVoid {
-		return nil
-	}
-
-	return <-c.commandChannels[&cmd]
 }
